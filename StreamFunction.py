@@ -29,7 +29,6 @@ def cal_stream_fn(data):
   psi_lat_rev = np.zeros((len(data['time']),len(data['pfull']),len(data['lat'])))
   omega = data['omega']
   vcomp = data['vcomp']
-
   assert isinstance(omega,np.ma.core.MaskedArray)  == True , 'Data is not masked' 
   
   print('... Integrate first direction')
@@ -41,9 +40,10 @@ def cal_stream_fn(data):
 
       for l in range(len( data['lat']) -1):
         w_val = np.array([omega[t,p,l],omega[t,p+1,l],omega[t,p,l+1],omega[t,p+1,l+1]])
+
         if np.ma.count(w_val) == 4:
           dlat=lat_rad[l] - lat_rad[l+1]
-          psi_lat[t,p,l+1] = psi_lat[t,p,l] + dlat * fn_const_dlat * np.cos(lat_rad[l+1]) * 0.25*(np.sum(w_val))
+          psi_lat[t,p,l+1] = psi_lat[t,p,l] + dlat * fn_const_dlat * np.cos(lat_rad[l+1]) * 0.25*(np.nansum(w_val))
         else:  
           print('Address missing values if required')
           pdb.set_trace()
@@ -52,7 +52,7 @@ def cal_stream_fn(data):
         w_val_rev = np.array([omega[t,p,l],omega[t,p+1,l-1],omega[t,p,l-1],omega[t,p+1,l]])
         if np.ma.count(w_val_rev) == 4:
           dlat=lat_rad[l] - lat_rad[l-1]   #positive
-          psi_lat_rev[t,p,l-1] = psi_lat_rev[t,p,l]+ dlat*fn_const_dlat*np.cos(lat_rad[l-1])* 0.25*(np.sum(w_val_rev))
+          psi_lat_rev[t,p,l-1] = psi_lat_rev[t,p,l]+ dlat*fn_const_dlat*np.cos(lat_rad[l-1])* 0.25*(np.nansum(w_val_rev))
         else:
           print('Address missing values if required')
           pdb.set_trace()
@@ -69,7 +69,7 @@ def cal_stream_fn(data):
         v_val=np.array([vcomp[t,p,l],vcomp[t,p,l+1],vcomp[t,p+1,l],vcomp[t,p+1,l+1]])
         if np.ma.count(v_val) == 4:
           dp = (data['pfull'][p]-data['pfull'][p+1])*100   #in Pa and negative
-          psi_p[t,p+1,l]=psi_p[t,p,l]+dp * fn_const_dp * 0.25*(np.sum(v_val))
+          psi_p[t,p+1,l]=psi_p[t,p,l]+dp * fn_const_dp * 0.25*(np.nansum(v_val))
         else: 
           print('Address missing values if required')
           pdb.set_trace()  
@@ -78,7 +78,7 @@ def cal_stream_fn(data):
         v_val_rev=np.array([vcomp[t,p-1,l],vcomp[t,p-1,l+1],vcomp[t,p,l+1],vcomp[t,p,l]])
         if np.ma.count(v_val_rev) == 4:
           dp=(data['pfull'][p] - data['pfull'][p-1])*100   #in Pa and positive
-          psi_p_rev[t,p-1,l] = psi_p_rev[t,p,l] + dp*fn_const_dp* 0.25*(np.sum(v_val_rev))
+          psi_p_rev[t,p-1,l] = psi_p_rev[t,p,l] + dp*fn_const_dp* 0.25*(np.nansum(v_val_rev))
         else:  
           print('Address missing values if required')
           pdb.set_trace()
