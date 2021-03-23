@@ -26,77 +26,73 @@ def cal_stream_fn_trap_rule(data, pres_var_name):
     '''Calculates the mass stream function. 
        Data is a dictionary containing masked zonal-mean arrays of omega and vcomp
        Pressure can be in hPa or Pa.
+       Return: a masked numpy array with units x10^10 kg/s
     '''
   
+    #constants
     grav=9.81 #m/s
     rad_earth=6.371e6 #m
-    lat_rad=np.radians(data['lat'])
     psi_scale_factor = 1e10
 
-    omega = data['omega']
-    vcomp = data['vcomp']
-    assert isinstance(omega,np.ma.core.MaskedArray)  == True , 'Data is not masked' 
-    assert len(omega.shape)  == 3, 'Data shape is not 3D, investigate' 
+    #data properties
+    input_dtype =  data['omega'].dtype
+    fill_value = data['omega']._fill_value
+
+    #convert degree to rad
+    lat_rad=np.radians(data['lat'], dtype=input_dtype)
+
+    #check data
+    assert isinstance(data['omega'],np.ma.core.MaskedArray)  == True , 'Data is not masked' 
+    assert len(data['omega'].shape)  == 3, 'Data shape is not 3D, investigate' 
 
     if data[pres_var_name].max() > 1100:
-        #data in Pa
+        #data is already in Pa
         pres_factor = 1.
     else:
-        #data in Pa
+        #data in hPa, convert to Pa
         pres_factor = 100.
 
     #integrate psi wrt latitude
-    int_lat_omega_forward  = cumtrapz(np.cos(lat_rad) * omega, x=lat_rad, axis=-1, initial=0)
-    int_lat_omega_backward = cumtrapz(np.cos(lat_rad) * omega[:,:,::-1], x=lat_rad[::-1], axis=-1, initial=0)
-
-    psi_lat_frwd = ((-2.*np.pi*rad_earth*rad_earth)/grav) * int_lat_omega_forward /psi_scale_factor
-    psi_lat_bkwd = ((-2.*np.pi*rad_earth*rad_earth)/grav) * int_lat_omega_backward/psi_scale_factor
-
+    int_lat_omega  = cumtrapz(np.cos(lat_rad) * data['omega'], x=lat_rad, axis=-1, initial=0)
+    psi_lat= ((-2.*np.pi*rad_earth*rad_earth)/grav) * int_lat_omega /psi_scale_factor
     #mask where omega was masked
-    psi_lat_frwd = np.ma.masked_array(psi_lat_frwd, omega.mask)
-    psi_lat_bkwd = np.ma.masked_array(psi_lat_bkwd[:,:,::-1], omega.mask)
-    pdb.set_trace()
-    #integrate psi wrt pressure  both in the forward and backward directions
-    int_v_forward  = cumtrapz(vcomp, x=data[pres_var_name]*pres_factor, axis=1, initial=0)
-    int_v_backward = cumtrapz(vcomp[:,::-1,:], x=data[pres_var_name][::-1]*pres_factor, axis=1, initial=0)
+    psi_lat = np.ma.masked_array(psi_lat, data['omega'].mask)
 
-    psi_pres_frwd = ((2.*np.pi*rad_earth*np.cos(lat_rad)) /grav ) * int_v_forward/psi_scale_factor
-    psi_pres_bkwd = ((2.*np.pi*rad_earth*np.cos(lat_rad)) /grav ) * int_v_backward/psi_scale_factor
-
+    #integrate psi wrt pressure
+    int_v  = cumtrapz(data['vcomp'], x=data[pres_var_name]*pres_factor, axis=1, initial=0)
+    psi_pres = ((2.*np.pi*rad_earth*np.cos(lat_rad)) /grav ) * int_v/psi_scale_factor
     #mask where vcomp was masked
-    psi_pres_frwd = np.ma.masked_array(psi_pres_frwd, vcomp.mask)
-    psi_pres_bkwd = np.ma.masked_array(psi_pres_bkwd[:,::-1,:], vcomp.mask)
+    psi_pres = np.ma.masked_array(psi_pres, data['vcomp'].mask)
 
     #take the mean over the stream functions
-    psi = np.mean( np.array([psi_pres_frwd,psi_pres_bkwd,psi_lat_frwd,psi_lat_bkwd]), axis=0 )
+    psi = np.mean( np.array([psi_lat,psi_pres]), axis=0, dtype=input_dtype)
+    psi_mask = np.logical_or(data['vcomp'].mask, data['omega'].mask)
 
-    make_plot=True
+    #mask if both omega and vcomp are both masked, else not masked
+    psi = np.ma.masked_array(psi, psi_mask, fill_value=fill_value)
+
+    make_plot=False
     if make_plot:
-        plot_stream_function(psi_pres_frwd, psi_pres_bkwd,
-                             psi_lat_frwd, psi_lat_bkwd, 
-                             psi, data['lat'], data[pres_var_name], omega, vcomp, pres_factor)
-    pdb.set_trace()
+        plot_stream_function(psi_lat,psi_pres, psi, data['lat'], 
+                             data[pres_var_name], data['omega'], data['vcomp'], pres_factor)
+
     return psi
 
-def plot_stream_function(psi_pres_frwd, psi_pres_bkwd,
-                         psi_lat_frwd, psi_lat_bkwd, 
-                         psi, lat, pres, omega, vwind, pres_factor):
+def plot_stream_function(psi_lat, psi_pres, psi, lat, pres, omega, vwind, pres_factor):
 
     import matplotlib.pyplot as plt
     import matplotlib as mpl
 
     bounds=np.arange(-10,10,1)
     cmap=plt.get_cmap('RdBu_r')
-    names = ['psi_pres_frwd','psi_pres_bkwd','psi_lat_frwd','psi_lat_bkwd',
-             'psi', 'omega', 'vwind']
-    data_list = [psi_pres_frwd,psi_pres_bkwd,psi_lat_frwd,psi_lat_bkwd,
-                 psi]#, omega, vwind]
+    names = ['psi_lat','psi_pres','psi', 'omega', 'vwind']
+    data_list = [psi_lat,psi_pres, psi, omega, vwind]
 
-    for count, data in enumerate([psi_lat_bkwd]):#(data_list):
-        if count ==5:
+    for count, data in enumerate(data_list):
+        if count ==3:
             bounds=np.arange(-0.1,0.11,.01)
             label_format = '%.2f'
-        elif count ==6:
+        elif count ==4:
             bounds=np.arange(-2.5,2.6,0.5)
             label_format = '%.2f'
         else:
@@ -105,21 +101,18 @@ def plot_stream_function(psi_pres_frwd, psi_pres_bkwd,
 
         norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
 
-        for t in range(data.shape[0]):
-            fig = plt.figure(figsize=(8, 8))
-            ax = fig.add_axes([0.15, 0.15, 0.8, 0.8])
-            #data_plot = np.mean(data, axis=0)
-            data_plot = data[t,:,:]
-            filled_map = ax.pcolormesh(lat, (pres/pres_factor)/100., data_plot,
-                                       cmap=cmap,norm=norm, shading='nearest')
-            ax.set_ylim(1000,100)
-            ax_cb=fig.add_axes([0.15, 0.05, 0.8, 0.03]) #[xloc, yloc, width, height]
-            cbar = mpl.colorbar.ColorbarBase(ax_cb, cmap=cmap,norm=norm, ticks=bounds,
-                                             orientation='horizontal',format=label_format,
-                                             extend='both')
-            filename='testing_psi_{0}_{1}.eps'.format(names[count],t)
-            plt.savefig(filename)
-            plt.show()
-    pdb.set_trace()
+        fig = plt.figure(figsize=(8, 8))
+        ax = fig.add_axes([0.15, 0.15, 0.8, 0.8])
+        data_plot = np.mean(data, axis=0)
+        filled_map = ax.pcolormesh(lat, (pres/pres_factor)/100., data_plot,
+                                   cmap=cmap,norm=norm, shading='nearest')
+        ax.set_ylim(1000,100)
+        ax_cb=fig.add_axes([0.15, 0.05, 0.8, 0.03]) #[xloc, yloc, width, height]
+        cbar = mpl.colorbar.ColorbarBase(ax_cb, cmap=cmap,norm=norm, ticks=bounds,
+                                         orientation='horizontal',format=label_format,
+                                         extend='both')
+        filename='testing_psi_{0}.eps'.format(names[count])
+        plt.savefig(filename)
+        plt.show()
 
 
