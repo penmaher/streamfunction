@@ -22,11 +22,17 @@ __author__ = 'Penelope Maher'
                 and taking into account the scale factor kg/s 1x10^10
 '''
 
-def cal_stream_fn_trap_rule(data, pres_var_name):
+def cal_stream_fn_trap_rule(data, pres_var_name, name_flag=None):
     '''Calculates the mass stream function. 
        Data is a dictionary containing masked zonal-mean arrays of omega and vcomp
        Pressure can be in hPa or Pa.
        Return: a masked numpy array with units x10^10 kg/s
+ 
+      When to use cal_stream_fn_trap_rule in StreamFunction_trapz.py?
+           When data is not masked as it is faster.
+      When to use cal_stream_fn_riemann?
+           When data is masked as use cal_stream_fn_trap_rule does not handle 
+           missing data properly.
     '''
   
     #constants
@@ -74,16 +80,15 @@ def cal_stream_fn_trap_rule(data, pres_var_name):
     make_plot=False
     if make_plot:
         plot_stream_function(psi_lat,psi_pres, psi, data['lat'], 
-                             data[pres_var_name], data['omega'], data['vcomp'], pres_factor)
+                             data[pres_var_name]*pres_factor, data['omega'], data['vcomp'], name_flag)
 
     return psi
 
-def plot_stream_function(psi_lat, psi_pres, psi, lat, pres, omega, vwind, pres_factor):
+def plot_stream_function(psi_lat, psi_pres, psi, lat, pres, omega, vwind, name_flag):
 
     import matplotlib.pyplot as plt
     import matplotlib as mpl
 
-    bounds=np.arange(-10,10,1)
     cmap=plt.get_cmap('RdBu_r')
     names = ['psi_lat','psi_pres','psi', 'omega', 'vwind']
     data_list = [psi_lat,psi_pres, psi, omega, vwind]
@@ -96,23 +101,36 @@ def plot_stream_function(psi_lat, psi_pres, psi, lat, pres, omega, vwind, pres_f
             bounds=np.arange(-2.5,2.6,0.5)
             label_format = '%.2f'
         else:
-            bounds=np.arange(-10,10,1)
+            bounds=np.arange(-10,10.1,1)
             label_format = '%d'
 
-        norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+        plot_single(data, pres, lat, bounds, names[count], label_format, cmap, name_flag)
 
-        fig = plt.figure(figsize=(8, 8))
-        ax = fig.add_axes([0.15, 0.15, 0.8, 0.8])
-        data_plot = np.mean(data, axis=0)
-        filled_map = ax.pcolormesh(lat, (pres/pres_factor)/100., data_plot,
-                                   cmap=cmap,norm=norm, shading='nearest')
-        ax.set_ylim(1000,100)
-        ax_cb=fig.add_axes([0.15, 0.05, 0.8, 0.03]) #[xloc, yloc, width, height]
-        cbar = mpl.colorbar.ColorbarBase(ax_cb, cmap=cmap,norm=norm, ticks=bounds,
-                                         orientation='horizontal',format=label_format,
-                                         extend='both')
-        filename='testing_psi_{0}.eps'.format(names[count])
-        plt.savefig(filename)
-        plt.show()
+def plot_single(data, pres, lat, bounds, name, label_format, cmap=None, name_flag=None):
+
+    #incoming pressure is in Pa
+
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+
+    if cmap== None:
+        cmap = plt.get_cmap('RdBu_r')
+
+    norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_axes([0.15, 0.15, 0.8, 0.8])
+    
+    data_plot = np.ma.mean(data, axis=0)
+    filled_map = ax.pcolormesh(lat, pres/100., data_plot,
+                               cmap=cmap,norm=norm, shading='nearest')
+    ax.set_ylim(1200,100)
+    ax_cb=fig.add_axes([0.15, 0.05, 0.8, 0.03]) #[xloc, yloc, width, height]
+    cbar = mpl.colorbar.ColorbarBase(ax_cb, cmap=cmap,norm=norm, ticks=bounds,
+                                     orientation='horizontal',format=label_format,
+                                     extend='both')    
+    filename='testing_psi_{0}{1}.eps'.format(name, name_flag)
+    plt.savefig(filename)
+    plt.show()
 
 
