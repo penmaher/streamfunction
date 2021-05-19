@@ -95,7 +95,7 @@ def plot_stream_function(psi_lat, psi_pres, psi, lat, pres, omega, vwind, name_f
 
     for count, data in enumerate(data_list):
         if count ==3:
-            bounds=np.arange(-0.1,0.11,.01)
+            bounds=np.arange(-0.05,0.05,.001)
             label_format = '%.2f'
         elif count ==4:
             bounds=np.arange(-2.5,2.6,0.5)
@@ -124,7 +124,7 @@ def plot_single(data, pres, lat, bounds, name, label_format, cmap=None, name_fla
     data_plot = np.ma.mean(data, axis=0)
     filled_map = ax.pcolormesh(lat, pres/100., data_plot,
                                cmap=cmap,norm=norm, shading='nearest')
-    ax.set_ylim(1200,100)
+    ax.set_ylim(1000,100)
     ax_cb=fig.add_axes([0.15, 0.05, 0.8, 0.03]) #[xloc, yloc, width, height]
     cbar = mpl.colorbar.ColorbarBase(ax_cb, cmap=cmap,norm=norm, ticks=bounds,
                                      orientation='horizontal',format=label_format,
