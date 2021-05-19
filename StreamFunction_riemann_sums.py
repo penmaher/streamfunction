@@ -1,7 +1,7 @@
 import numpy as np
 import pdb
 
-from .StreamFunction_trapz import plot_stream_function, plot_single
+from scipy.integrate import cumtrapz
 
 __author__ = 'Penelope Maher'
 
@@ -23,35 +23,7 @@ __author__ = 'Penelope Maher'
                 and taking into account the scale factor kg/s 1x10^10
 '''
 
-def set_fill_value(data, fill_value):
-    #note this returns a unmasked array!
-    for var in ['omega', 'vcomp']:
-        #mask  = data[var].mask
-        data[var] = data[var].filled(fill_value=-333.)
-        #data[var] = np.ma.masked_array(data[var], mask fill_value=-333.)
-    return data
 
-def data_ordering(data)
-    #if SH pole is not the first element, then reverse direction
-    if np.where(data['lat'] == data['lat'].min())[0] !=0:
-        lat = data['lat'][::-1].copy()
-        omega = data['omega'][:,:,::-1].copy()
-        vcomp = data['vcomp'][:,:,::-1].copy()
-    else:
-        lat = data['lat'].copy()
-        omega = data['omega'].copy()
-        vcomp = data['vcomp'].copy()
-
-    # the pressure integral is from surface up.
-    if np.where(data[pres_var_name] == data[pres_var_name].min())[0] ==0:
-        pres = data[pres_var_name][::-1]*pres_factor
-        omega = data['omega'][:,::-1,:].copy()
-        vcomp = data['vcomp'][:,::-1,:].copy()
-    else:
-        pres  = data[pres_var_name]*pres_factor 
-        omega = data['omega'].copy()
-        vcomp = data['vcomp'].copy()
-    return lat, omega, vcomp
 
 def mask_array(data_shape, fill_value):
     #create a new array without missing values but is masked
@@ -60,240 +32,369 @@ def mask_array(data_shape, fill_value):
     data = np.ma.masked_array(data, mask,  fill_value=fill_value)
     return data
 
+def set_fill_value(data, fill_value):
+    #take a masked array, update the fill value and return a masked array
+   
+    mask  = data.mask.copy()
 
-def cal_stream_fn_riemann(data, pres_var_name, name_flag=None, testing=False):
-    '''Calculates the mass stream function. 
-       Data is a dictionary containing masked zonal-mean arrays of omega and vcomp
-       Pressure can be in hPa or Pa.
-       Return: a masked numpy array with units x10^10 kg/s
-
-       When to use cal_stream_fn_trap_rule in StreamFunction_trapz.py?
-           When data is not masked as it is faster.
-
-       When to use cal_stream_fn_riemann?
-           When data is masked as use cal_stream_fn_trap_rule does not handle 
-           missing data properly.
-
-       Note: in other peoples code (e.g. TrapD by Ori Admas and in Martin Juckers
-           (https://github.com/mjucker/aostools/blob/master/climate.py), psi is
-           only computed using vcomp and note the omega component.
-    '''
-
-    #https://www.math.ubc.ca/~pwalls/math-python/integration/riemann-sums/
-  
-    #constants
-    grav=9.81 #m/s
-    rad_earth=6.371e6 #m
-    psi_scale_factor = 1e10
-
-    #data properties
-    input_dtype =  data['omega'].dtype
-    fill_value = data['omega'].fill_value
-
-    #check data
-    assert isinstance(data['omega'],np.ma.core.MaskedArray)  == True , 'Data is not masked' 
-    assert len(data['omega'].shape)  == 3, 'Data shape is not 3D, investigate' 
-
-    #test if data is in Pa or hPa - multiply data by 100 if in hPa
-    if data[pres_var_name].max() > 1100:        
-        pres_factor = 1.
-    else:
-        pres_factor = 100.
-
-    #ensure data is from SH to NH and surface to TOA. 
-    lat, omega, vcomp = data_ordering(data)    
-
-    #degree to radians
-    lat_rad=np.radians(lat, dtype=input_dtype)
-
-    #If cumtrap is used, then need to set the fill value to zero
-    data_unmasked = set_fill_value(data, 0.0)
-
-    #new masked data arrays
-    left_riemann_sum_lat   = mask_array(omega.shape, fill_value)
-    right_riemann_sum_lat  = mask_array(omega.shape, fill_value)
-    left_riemann_sum_pres  = mask_array(omega.shape, fill_value)
-    right_riemann_sum_pres = mask_array(omega.shape, fill_value)
-
-    #start the loop at 1 (not 0) and integrate cos(lat) x omega from 90S to 90N
-    for count in range(1, len(lat_rad)):
-        dlat = lat_rad[count] - lat_rad[count-1]  #dlat > 0 
-
-        #Find the area in the current block and then add to previous sum
-        #If the current block is masked, keep the previous left sum. 
-        #int_segment = np.cos(lat_rad[count]) * omega[:,:,count-1] * dlat
-        #left_riemann_sum_lat[:s,:,count] = np.ma.array(left_riemann_sum_lat[:,:,count-1].data + int_segment.data,
-        #                                              mask=list(map(and_,left_riemann_sum_lat.mask[:,:,count-1],int_segment.mask)))
-
-        left_riemann_sum_lat[:,:,count]  = (left_riemann_sum_lat[:,:,count-1] + 
-                                            np.cos(lat_rad[count]) * omega[:,:,count-1] * dlat)                                          
-
-        #int_segment = np.cos(lat_rad[count]) * omega[:,:,count] * dlat
-        #right_riemann_sum_lat[:,:,count] = np.ma.array(right_riemann_sum_lat[:,:,count-1].data + int_segment.data,
-        #                                              mask=list(map(and_,right_riemann_sum_lat.mask[:,:,count-1],int_segment.mask)))
-
-        right_riemann_sum_lat[:,:,count] = (right_riemann_sum_lat[:,:,count-1] +
-                                           np.cos(lat_rad[count]) * omega[:,:,count] * dlat)
-       
-    if testing:
-    #if False:
-        testing_riemann_sum(vcomp, omega, pres, lat, lat_rad, 'lat',
-                            right_riemann_sum_lat, left_riemann_sum_lat)
-
-    for count in range(1,len(pres)):
-
-        dp = (pres[count] - pres[count-1])  #dp<0
-        
-        left_riemann_sum_pres[:,count,:] = (left_riemann_sum_pres[:,count-1,:]+
-                                           vcomp[:,count-1,:] * dp )
-
-        right_riemann_sum_pres[:,count,:] = (right_riemann_sum_pres[:,count-1,:]+
-                                            vcomp[:,count,:] * dp )
-
-        
-    if testing:
-    #if False:
-        testing_riemann_sum(vcomp, omega, pres, lat, lat_rad, 'pres',
-                           right_riemann_sum_pres, left_riemann_sum_pres)
-
-    pdb.set_trace()
-
-    #psi should be masked if left and right sums are both masked
-    mask_psi_lat = np.logical_and(left_riemann_sum_lat.mask,right_riemann_sum_lat.mask)
-    mask_psi_pres = np.logical_and(left_riemann_sum_pres.mask,right_riemann_sum_pres.mask)
-
-    riemann_lat_avg = avg_two_masked_arrays(left_riemann_sum_lat, 
-                                            right_riemann_sum_lat, 
-                                            fill_value,
-                                            mask_psi_lat)
-
-    riemann_pres_avg = avg_two_masked_arrays(left_riemann_sum_pres, 
-                                             right_riemann_sum_pres, 
-                                             fill_value,
-                                             mask_psi_pres)            
-
-    #Apply the scaling for the psi intergrals
-    psi_lat  = ((-2.*np.pi*rad_earth*rad_earth)/grav) * riemann_lat_avg /psi_scale_factor
-    psi_pres = ((2.*np.pi*rad_earth*np.cos(lat_rad))/grav)[np.newaxis,np.newaxis,:] * riemann_pres_avg/psi_scale_factor
-
-    #if False:
-    if testing:
-        testing_psi(lat, pres, 'pres', psi_pres, riemann_pres_avg)
-        testing_psi(lat, pres, 'lat', psi_lat, riemann_lat_avg)
-
-    #psi should be masked if psi_lat and psi_omegs are both masked
-    #psi_mask = np.logical_and(vcomp.mask, omega.mask)
-
-    psi = avg_two_masked_arrays(psi_lat, psi_pres, mask_psi_lat, fill_value, mask2 = mask_psi_pres)     
-
-
-    make_plot=True
-    if make_plot:
-        plot_stream_function(psi_lat,psi_pres, psi, lat, 
-                             pres, omega, vcomp, name_flag)
-
-    #if lat or pressure was reversed, then put back to original form
-    if np.where(data['lat'] == data['lat'].min())[0] !=0:
-        psi = psi[:,:,::-1].copy()
-
-    if np.where(data[pres_var_name] == data[pres_var_name].min())[0] ==0:
-        psi = psi[:,::-1,:].copy()
-
-    pdb.set_trace()
-
-
-    return psi
-
-
-
-def test_for_missing_data(data, lat_start, pres_start):
-    
-    wh_missing = np.where(data.mask == True)[0]
-    data_mask = data.mask
-    #if there is missing data, then loop over dims to find its location.
-    if len(wh_missing) != 0:
-        for lat_dim in range(lat_start, data.shape[2]):
-            for pres_dim in range(pres_start, data.shape[1]):                
-                for time_dim in range(data.shape[0]):
-                    if data_mask[time_dim,pres_dim,lat_dim] == True:
-                        print('Missing values to deal with')
-                        print(time_dim,pres_dim,lat_dim)
-                        pdb.set_trace()
-
-
-def avg_two_masked_arrays(array1, array2, mask1, fill_value, mask2=None):
-    
-    assert array1.shape == array2.shape, 'Input data is different shapes. Cant take average' 
-
-    #expand the 3d mask into a 4d mask
-    array_dim = [2] + [x for x in array1.shape]
-    mask = np.zeros(tuple(array_dim), dtype=bool)
-    if mask2 is None:
-        mask[:,...] = mask1
-    else:
-        mask[:,...] = np.logical_and(mask1,mask2)
-
-    #fill the first dim with the two arrays and then take the mean
-    data_to_avg = np.array([array1, array2])
-    array = np.ma.masked_array(data_to_avg, mask, fill_value=fill_value)
-    array_avg = np.ma.mean(array, axis=0)
-
-    return array_avg
-
-def testing_riemann_sum(vcomp, omega, pres, lat, lat_rad, test_type,
-                        right_riemann_sum, left_riemann_sum):
-
-    ''' The cumtrapz function does not manage masked data. But can be used
-        as a sanity check to make sure integration looks reasonable.'''
-
-    print('Testing riemann sums for ', test_type)
-
-    name_flag = '_fluxum_fixed_sst'
-#    name_flag = '_era'
-
-    if test_type == 'lat':
-        plot_data = omega
-        var_flag = 'omega'
-        data_factor = 100
-        plot_scale_factor = 1e3
-    else:
-        plot_data = vcomp
-        var_flag = 'vcomp'
-        data_factor = 1
-        plot_scale_factor = 2e-5
-
-    from scipy.integrate import cumtrapz
-    if test_type == 'lat':
-        int_val  = cumtrapz((np.cos(lat_rad) * plot_data), x=lat_rad, axis=-1, initial=0)
-        #int_val2  = cumulative_trapezoid((np.cos(lat_rad) * plot_data), x=lat_rad, axis=-1, initial=0)
-    else:
-        int_val  = cumtrapz(plot_data, x=pres, axis=1, initial=0)
-        #int_val2  = cumulative_trapezoid(plot_data, x=pres, axis=1, initial=0)
-
-    plot_single(plot_data*data_factor, pres, lat, np.arange(-1,1.1,0.25), var_flag, '%.1f', name_flag=name_flag)
-
-    plot_single(right_riemann_sum*plot_scale_factor, pres, lat, np.arange(-1,1.1,0.25), 'right_'+ test_type, '%.1f', name_flag=name_flag)
-
-    plot_single(left_riemann_sum*plot_scale_factor, pres, lat, np.arange(-1,1.1,0.25), 'left_'+ test_type, '%.1f', name_flag=name_flag)        
-
-
-    plot_single(int_val*plot_scale_factor, pres, lat,  np.arange(-1,1.1,0.25), 'cumtrapz_'+ test_type, '%.1f', name_flag=name_flag)
-    #plot_single(int_val2*plot_scale_factor, pres, lat,  np.arange(-1,1.1,0.25), 'cumtrapz2_'+ test_type, '%.1f', name_flag=name_flag)
-
-    pdb.set_trace()
-
-def testing_psi(lat, pres, test_type,
-                psi, riemann_avg):
-
-    print('Testing psi output for ', test_type)
-
-    name_flag = '_fluxum_fixed_sst'
-
-    if test_type == 'lat':
-        plot_scale_factor = 1
-    else:
-        plot_scale_factor = 1e-4
+    #replace the data.masked value with the specificied fill_value
+    data = data.filled(fill_value=fill_value) #returns an unmasked arrary
+    data_out = np.ma.masked_array(data, mask, fill_value=fill_value)
  
-    plot_single(psi, pres/100., lat, np.arange(-20,20.2,2), 'psi', '%d', name_flag=name_flag)
-    plot_single(riemann_avg*plot_scale_factor, pres/100., lat, np.arange(-1,1.1,0.1), 'riemann_avg_'+test_type, '%.1f', name_flag=name_flag)
-    pdb.set_trace()
+    return data_out
+
+
+class MeridionalStreamFunction():
+
+    '''Calculates the mass stream function. 
+           Data is a dictionary with masked zonal-mean arrays of omega and vcomp.
+           Pressure can be in hPa or Pa.
+
+           Return: masked array with units x10^10 kg/s (i.e. it is scaled)
+
+           Why compute the Riemann sums when you can use cumtrapz directly?
+               Cumtrapz works great for unmasked arrays. I used it to validate
+               the code. But for masked arrays, it ignores the mask which can 
+               make for problematic stream functions.
+
+           Note: in other peoples code (e.g. TrapD by Ori Admas and in Martin Juckers
+               (https://github.com/mjucker/aostools/blob/master/climate.py), 
+               psi is only computed using vcomp and not both the vcomp and omega
+               components in this code.
+    '''
+    #for more information on riemann sums, see for example
+    #https://www.math.ubc.ca/~pwalls/math-python/integration/riemann-sums/
+
+    def __init__(self, pres_var_name, testing=False, name_flag=None):
+
+        #constants
+        self.grav=9.81 #m/s
+        self.rad_earth=6.371e6 #m
+
+        #scale factor for outputting psi
+        self.psi_scale_factor = 1e10
+
+        #the data's pressure name
+        self.pres_var_name = pres_var_name
+
+        #testing flag is for debugging
+        self.testing = testing
+        #syntax end of filename for plots during debugging
+        self.name_flag = name_flag 
+
+        #data to be assigned during the script
+        self.pres     = None
+        self.lat      = None
+        self.lat_rad  = None
+        self.omega_zm = None
+        self.vcomp_zm = None
+
+        #assigned during method
+        self.input_dtype = None
+        self.fill_value  = None
+
+        #was the data reordered?
+        self.flip_lat = None
+        self.flip_pres = None
+
+    def data_properties(self, data):
+
+        #data properties
+        self.input_dtype =  data['omega'].dtype
+        self.fill_value = data['omega'].fill_value
+
+        #check data
+        assert isinstance(data['omega'],np.ma.core.MaskedArray)  == True , 'Data is not masked' 
+        assert len(data['omega'].shape)  == 3, 'Data shape is not 3D, investigate' 
+
+    def data_ordering(self, data):
+
+        #if SH pole is not the first element, then reverse direction
+        if np.where(data['lat'] == data['lat'].min())[0] !=0:
+            self.lat      = data['lat'][::-1].copy()
+            self.omega_zm = data['omega'][:,:,::-1].copy()
+            self.vcomp_zm = data['vcomp'][:,:,::-1].copy()
+            self.flip_lat = True
+        else:
+            self.lat = data['lat'].copy()
+            self.omega_zm = data['omega'].copy()
+            self.vcomp_zm = data['vcomp'].copy()
+            self.flip_lat = False
+
+        #test if data is in Pa or hPa - multiply data by 100 if in hPa
+        if data[self.pres_var_name].max() > 1100:        
+            pres_factor = 1.
+        else:
+            pres_factor = 100.
+
+        # the pressure integral is from surface up.
+        if np.where(data[self.pres_var_name] == data[self.pres_var_name].min())[0] ==0:
+            self.pres = data[self.pres_var_name][::-1]*pres_factor
+            self.omega_zm = self.omega_zm[:,::-1,:].copy()
+            self.vcomp_zm = self.vcomp_zm[:,::-1,:].copy()
+            self.flip_pres = True
+        else:
+            self.pres  = data[self.pres_var_name]*pres_factor 
+            self.flip_pres = False
+
+    def revert_data_ordering(self, data, psi):
+
+        #if lat or pressure was reversed, then put back to original form
+        if self.flip_lat:
+            psi = psi[:,:,::-1].copy()
+
+        if self.flip_pres:
+            psi = psi[:,::-1,:].copy()
+
+        return psi
+
+    def set_fill_value_zero(self):
+        # note this is only valid for surface missing values and not 
+        # missing values in obs data for eg.
+
+        #note that this method assigns a np array that is NOT masked
+        self.omega_zm = set_fill_value(self.omega_zm, 0.0)
+        self.vcomp_zm = set_fill_value(self.vcomp_zm, 0.0)
+
+    def cumtrap_method_lat(self):
+
+        #compute using scipy generated integration as a sanity check
+        trap_lat  = cumtrapz( np.cos(self.lat_rad) * self.omega_zm.data, 
+                              x=self.lat_rad, axis=-1, initial=0)
+
+        return trap_lat
+
+    def cumtrap_method_pres(self):
+
+        #compute using scipy generated integration
+        trap_pres  = cumtrapz(self.vcomp_zm.data, x=self.pres, axis=1, initial=0)
+
+        return trap_pres
+
+    def riemann_sum_lat(self):
+        #compute the left and right riemann sums of psi_lat
+
+        #new masked data arrays
+        left_riemann_sum_lat   = mask_array(self.omega_zm.shape, self.fill_value)
+        right_riemann_sum_lat  = mask_array(self.omega_zm.shape, self.fill_value)
+
+        #start the loop at 1 (not 0) and integrate cos(lat) x omega from 90S to 90N
+        for count in range(1, len(self.lat_rad)):
+            #when integrating, use omega as unmasked data, else strips will be removed
+            #from the resulting integral. Instead the missing values have been set to
+            #zero and when it is integrated it will not contriute to the integral.
+
+            #get the integrtaions step - same value used for left and right sums
+            dlat = self.lat_rad[count] - self.lat_rad[count-1]  #dlat > 0 
+
+            #compute the left riemann sum
+            left_riemann_sum_lat[:,:,count]  = (left_riemann_sum_lat[:,:,count-1] + 
+                np.cos(self.lat_rad[count]) * self.omega_zm[:,:,count-1].data * dlat)                                          
+
+            #keep track of the data mask
+            left_riemann_sum_lat[:,:,count].mask = self.omega_zm[:,:,count-1].mask
+
+            #compute the right riemann sum
+            right_riemann_sum_lat[:,:,count] = (right_riemann_sum_lat[:,:,count-1] +
+                np.cos(self.lat_rad[count]) * self.omega_zm[:,:,count].data * dlat)
+
+            #keep track of the data mask
+            right_riemann_sum_lat[:,:,count].mask = self.omega_zm[:,:,count].mask
+
+        return left_riemann_sum_lat, right_riemann_sum_lat
+
+    def riemann_sum_pres(self):
+        #compute the left and right riemann sums of psi_pres
+
+        left_riemann_sum_pres  = mask_array(self.vcomp_zm.shape, self.fill_value)
+        right_riemann_sum_pres = mask_array(self.vcomp_zm.shape, self.fill_value)
+           
+        for count in range(1,len(self.pres)):
+
+            dp = (self.pres[count] - self.pres[count-1])  #dp<0
+            
+            #compute the left riemann sum
+            left_riemann_sum_pres[:,count,:] = (left_riemann_sum_pres[:,count-1,:]+
+                                               self.vcomp_zm[:,count-1,:].data * dp )
+
+            #keep track of the data mask
+            left_riemann_sum_pres[:,:,count].mask = self.vcomp_zm[:,:,count-1].mask
+
+
+            #compute the left riemann sum
+            right_riemann_sum_pres[:,count,:] = (right_riemann_sum_pres[:,count-1,:]+
+                                                self.vcomp_zm[:,count,:].data * dp )
+
+            #keep track of the data mask
+            right_riemann_sum_pres[:,:,count].mask = self.vcomp_zm[:,:,count].mask
+
+        return left_riemann_sum_pres, right_riemann_sum_pres
+
+    def avg_masked_array(self, array1, array2):
+        #inputs are two masked arrays of the same shape
+
+        assert array1.shape == array2.shape, 'Input data is different shapes.' 
+
+        #create a new masked array with dim [2, time, pre, lat]
+        new_array = np.ma.array((array1, array2))
+        #take the mean - if one array is masked, the value is the other array
+        array_avg  = np.ma.mean(new_array, axis=0)
+
+        return array_avg
+
+    def apply_psi_scaling(self, riemann_lat_avg, riemann_pres_avg):
+
+        psi_lat  = (-2.*np.pi*self.rad_earth*self.rad_earth)/self.grav * riemann_lat_avg 
+        
+        pres_const = ((2.*np.pi*self.rad_earth*np.cos(self.lat_rad))/self.grav)
+        psi_pres = pres_const[np.newaxis,np.newaxis,:] * riemann_pres_avg
+
+        return psi_lat/self.psi_scale_factor, psi_pres/self.psi_scale_factor
+
+    def cal_stream_fn_riemann(self, data, plot_result=True):
+
+        '''This part of the code does all the heavy lifting'''      
+
+        #check data and get dtype and fill value
+        self.data_properties(data)
+
+        #ensure data is from SH to NH, surface to TOA and pres in Pa 
+        self.data_ordering(data)
+
+        #degree to radians
+        self.lat_rad=np.radians(self.lat, dtype=self.input_dtype)
+
+        #Set the fill value to zero, else the surface masking will block out
+        #strips of the integration
+        self.set_fill_value_zero()
+
+        #Do the integration using the inbuild function cumtrap
+        # this is for a visual check for debugging the riemann sums
+        # the cumtrap function is a black box that does not handle masked data
+        # where the left and right sums I know exactly how it is computed
+        trap_lat = self.cumtrap_method_lat()
+        trap_pres = self.cumtrap_method_pres()
+
+        #Do the integration with the left and right riemann sums
+        left_riemann_sum_lat, right_riemann_sum_lat = self.riemann_sum_lat()
+        left_riemann_sum_pres, right_riemann_sum_pres = self.riemann_sum_pres()
+
+        #get the average of the left and right sums
+        riemann_lat_avg = self.avg_masked_array(left_riemann_sum_lat, right_riemann_sum_lat)
+        riemann_pres_avg = self.avg_masked_array(left_riemann_sum_pres, right_riemann_sum_pres)
+
+        #Apply the scaling for the psi intergrals
+        psi_lat, psi_pres = self.apply_psi_scaling(riemann_lat_avg, riemann_pres_avg)
+
+        #take the avergae of the two psi functions
+        psi = self.avg_masked_array(psi_lat, psi_pres)     
+
+        TS = TestingStreamfunction(self.omega_zm, self.vcomp_zm, 
+                                   self.pres, self.lat, self.lat_rad, self.name_flag)
+
+        if self.testing:
+            #make extra plots if testing code
+            TS.testing_riemann_sum('lat', right_riemann_sum_lat, left_riemann_sum_lat, 
+                                   trap_lat, riemann_lat_avg)
+
+            TS.testing_riemann_sum('pres', right_riemann_sum_pres, left_riemann_sum_pres, 
+                                   trap_pres, riemann_pres_avg)
+
+        if plot_result:
+            #always plot the psi values as a visual check the code is working
+            TS.testing_psi(psi_lat, psi_pres, psi)
+
+        #reverse the pressure back ot original coordinates if needed
+        psi = self.revert_data_ordering(data, psi)
+
+        return psi
+
+
+class TestingStreamfunction():
+
+    def __init__(self, omega_zm, vcomp_zm, pres, lat, lat_rad, name_flag):
+
+        self.omega_zm = omega_zm
+        self.vcomp_zm = vcomp_zm
+        self.pres     = pres
+        self.lat      = lat
+        self.lat_rad  = lat_rad
+
+        self.name_flag = name_flag
+ 
+    def testing_riemann_sum(self, test_type, right_riemann_sum, left_riemann_sum, 
+                            trap_val, riemann_avg, time_mean=True):
+
+        print('Testing riemann sums for ', test_type)
+
+        data_range = np.arange(-1,1.1,0.25)
+
+        if test_type == 'lat':
+            var_flag = 'omega'
+            data_factor = 10
+            plot_scale_factor = 1e2
+            data = self.omega_zm
+        else:
+            var_flag = 'vcomp'
+            data_factor = 1
+            plot_scale_factor = 2e-5
+            data = self.vcomp_zm
+
+        self.contour_plot(data*data_factor, data_range, var_flag, time_mean)
+
+        self.contour_plot(right_riemann_sum*plot_scale_factor, data_range, 'right_'+ test_type, time_mean)
+
+        self.contour_plot(left_riemann_sum*plot_scale_factor, data_range, 'left_'+ test_type, time_mean)        
+
+        self.contour_plot(riemann_avg*plot_scale_factor, data_range, 'avg_'+ test_type, time_mean)        
+
+        self.contour_plot(trap_val*plot_scale_factor, data_range, 'cumtrapz_'+ test_type, time_mean)
+
+    def testing_psi(self, psi_lat, psi_pres, psi, time_mean=True):
+     
+        scale_factor = 1
+        bounds = np.arange(-20.,20.1,5)
+        self.contour_plot(psi_lat*scale_factor,  bounds, 'psi_lat',time_mean)
+        self.contour_plot(psi_pres*scale_factor, bounds, 'psi_pres',time_mean)
+        self.contour_plot(psi*scale_factor, bounds, 'psi',time_mean)
+
+    def contour_plot(self, data, bounds, name, time_mean):
+
+        #incoming pressure is in Pa
+
+        import matplotlib.pyplot as plt
+        import matplotlib as mpl
+
+        cmap = plt.get_cmap('RdBu_r')
+
+        norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+
+        if time_mean:
+            time_loop_len = 1
+            start_loop = 1
+        else:
+            #sorry this is hard coded - I will change it in the future.
+            time_loop_len = 120+12#len(data.shape[0])
+            start_loop = 120
+
+        for count in range(start_loop, time_loop_len):
+            print('Time is: ', count)
+            if time_mean:
+                data_plot = np.ma.mean(data, axis=0)
+                filename='testing_psi_{0}.eps'.format(name, self.name_flag)
+            else:
+                data_plot = data[count,...].copy()
+
+            fig = plt.figure(figsize=(8, 8))
+            ax = fig.add_axes([0.15, 0.15, 0.8, 0.8])
+            
+            filled_map = ax.pcolormesh(self.lat, self.pres/100., data_plot,
+                                       cmap=cmap,norm=norm, shading='nearest')
+            ax.set_ylim(1000,100)
+            ax_cb=fig.add_axes([0.15, 0.05, 0.8, 0.03]) #[xloc, yloc, width, height]
+            cbar = mpl.colorbar.ColorbarBase(ax_cb, cmap=cmap,norm=norm, ticks=bounds,
+                                             orientation='horizontal',format='%.1f',
+                                             extend='both')    
+            if time_mean:
+                plt.savefig(filename)
+            plt.show()
