@@ -1,0 +1,14 @@
+This code was forked from https://github.com/penmaher/streamfunction
+
+This repo contains two files.
+
+StreamFunction_riemann_sums.py 
+    - The purpose of the code is to compute the meridional mass stream function
+    - This is done by integrating the meridional wind (vcomp) and the pressure
+      vertical velocity (omega). The integration is done using Riemann sums.
+    - See files for refs, equations, etc.
+
+StreamFunction_old_method.py 
+    - this file is here for the authors legacy. It should not be used.
+    - It has been superseded by StreamFunction_riemann_sums.py
+
