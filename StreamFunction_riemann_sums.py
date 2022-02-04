@@ -3,6 +3,8 @@ import pdb
 
 from scipy.integrate import cumtrapz
 
+import matplotlib.pyplot as plt
+
 __author__ = 'Penelope Maher'
 
 '''
@@ -370,14 +372,14 @@ class TestingStreamfunction():
         norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
 
         if time_mean:
-            time_loop_len = 1
             start_loop = 1
+            time_loop_len = 1
         else:
             #sorry this is hard coded - I will change it in the future.
-            time_loop_len = 120+12#len(data.shape[0])
             start_loop = 120
+            time_loop_len = 120+12#len(data.shape[0])
 
-        for count in range(start_loop, time_loop_len):
+        for count in range(start_loop, time_loop_len+1):
             print('Time is: ', count)
             if time_mean:
                 data_plot = np.ma.mean(data, axis=0)
